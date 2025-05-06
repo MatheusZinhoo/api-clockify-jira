@@ -181,10 +181,11 @@ def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: st
         print(f"⛔ Erro ao obter usuário: {str(e)}")
         return
         
+    usuario_json = response.json()
+
     if not usuario_json:
         print(f"❌ Erro ao obter usuário Clockify: {response.status_code} - {response.text}")
         return
-    usuario_json = response.json()
     
     # Configurações iniciais
     workspace_id = usuario_json['activeWorkspace']
