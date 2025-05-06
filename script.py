@@ -4,15 +4,16 @@ import re
 import os
 from dotenv import load_dotenv
 from pytz import utc
-
+import json
 
 load_dotenv()
 
-# Configurações
-CLOCKIFY_API_KEY = os.environ.get('CLOCKIFY_API_KEY')
-JIRA_API_TOKEN = os.environ.get('JIRA_API_TOKEN')
-JIRA_USER_EMAIL = 'kauan.k@widelab.com.br'
+# Configurações (agora usando as credenciais do Daniel para acesso)
+CLOCKIFY_API_KEY = os.environ.get('CLOCKIFY_API_KEY')  # API Key do Clockify do Matheus
+JIRA_API_TOKEN =  os.environ.get('JIRA_API_TOKEN')
+JIRA_USER_EMAIL="matheus.silva@widelab.com.br"
 JIRA_DOMAIN = 'widelab.atlassian.net'
+JIRA_REAL_USER = 'matheus.silva'  # Usuário que aparecerá nos worklogs
 
 def salvar_ultimo_processamento(timestamp: datetime.datetime):
     """Salva o último horário processado em formato ISO"""
@@ -35,12 +36,12 @@ def ler_ultimo_processamento() -> datetime.datetime:
             return datetime.datetime.now(utc) - datetime.timedelta(hours=24)
 
 def formatar_data_api(data: datetime.datetime) -> str:
-    """Formata datas para o padrão da API Clockify (YYYY-MM-DDTHH:MM:SSZ)"""
+    """Formata datas para o padrão da API Clockify"""
     return data.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 def extrair_issue_key(descricao: str) -> str:
-    """Extrai a chave do Jira da descrição usando regex"""
-    padrao = re.compile(r"([A-Za-z]+-\d+)")  # Aceita letras maiúsculas e minúsculas
+    """Extrai a chave do Jira da descrição"""
+    padrao = re.compile(r"([A-Za-z]+-\d+)")
     match = padrao.search(descricao or '')
     return match.group(1) if match else None
 
@@ -50,33 +51,22 @@ def dividir_intervalo(inicio: datetime.datetime, fim: datetime.datetime) -> list
     cursor = inicio
     
     while cursor < fim:
-        # Calcular fim do dia
         fim_dia = (cursor + datetime.timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        
-        # Determinar fim real do segmento
         fim_segmento = min(fim, fim_dia)
-        
         segmentos.append((cursor, fim_segmento))
-        
-        # Avançar para o próximo dia
         cursor = fim_segmento
     
     return segmentos
 
-# ==============================================
-# INTEGRAÇÃO COM APIs
-# ==============================================
 def obter_entradas_clockify(workspace_id: str, user_id: str, ultimo_processamento: datetime.datetime):
-    """Obtém entradas do Clockify após o último horário processado"""
+    """Obtém entradas do Clockify"""
     agora = datetime.datetime.now(utc)
     
-    # Garantir que não vamos para o futuro
     if ultimo_processamento > agora:
         ultimo_processamento = agora - datetime.timedelta(hours=24)
         
-    # Ajustar período máximo de consulta (7 dias)
     if (agora - ultimo_processamento).days > 7:
         ultimo_processamento = agora - datetime.timedelta(days=7)
     
@@ -85,21 +75,18 @@ def obter_entradas_clockify(workspace_id: str, user_id: str, ultimo_processament
         'end': formatar_data_api(agora)
     }
     
-    print(f"\n🔍 Buscando entradas no Clockify com parâmetros:")
-    print(f"   Início: {params['start']}")
-    print(f"   Fim:    {params['end']}")
+    print(f"\n🔍 Buscando entradas no Clockify de {params['start']} até {params['end']}")
     
     try:
         response = requests.get(
             f"https://api.clockify.me/api/v1/workspaces/{workspace_id}/user/{user_id}/time-entries",
             headers={'X-Api-Key': CLOCKIFY_API_KEY},
-            # params=params,
+            params=params,
             timeout=30
         )
         
         if response.status_code != 200:
-            print(f"⚠️ Erro na API Clockify: {response.status_code}")
-            print(f"   Mensagem: {response.text[:200]}...")
+            print(f"⚠️ Erro na API Clockify: {response.status_code} - {response.text[:200]}")
             return []
             
         return response.json()
@@ -109,13 +96,24 @@ def obter_entradas_clockify(workspace_id: str, user_id: str, ultimo_processament
         return []
 
 def criar_worklog_jira(issue_key: str, inicio: datetime.datetime, duracao_segundos: int, descricao: str) -> bool:
+    """Cria worklog no Jira atribuído ao usuário real (Matheus)"""
     url = f"https://{JIRA_DOMAIN}/rest/api/3/issue/{issue_key}/worklog"
+    print(f"Issue extraída: {issue_key}")
     
     payload = {
-        "comment": descricao,
-        "started": inicio.strftime("%Y-%m-%dT%H:%M:%S.000+0000"),
-        "timeSpentSeconds": int(duracao_segundos)
-    }
+    "comment": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"text": descricao, "type": "text"}]
+            }
+        ]
+    },
+    "started": inicio.strftime("%Y-%m-%dT%H:%M:%S.000+0000"),
+    "timeSpentSeconds": int(duracao_segundos)
+}
     
     try:
         response = requests.post(
@@ -130,30 +128,25 @@ def criar_worklog_jira(issue_key: str, inicio: datetime.datetime, duracao_segund
         )
         
         if response.status_code == 201:
-            print(f"✅ Worklog criado para {issue_key} em {inicio.date()}")
+            print(f"✅ Worklog criado para {issue_key} em {inicio.date()} como {JIRA_REAL_USER}")
             return True
             
-        print(f"⛔ Erro ao criar worklog: {response.status_code}")
-        print(f"   Detalhes: {response.text[:200]}...")
+        print(f"⛔ Erro ao criar worklog: {response.status_code} - {response.text[:200]}")
         return False
         
     except Exception as e:
         print(f"🔥 Erro de conexão: {str(e)}")
         return False
 
-
-# ==============================================
-# EXECUÇÃO PRINCIPAL
-# ==============================================
 def main():
     print("\n🚀 Iniciando integração Clockify → Jira")
     
-    # Verificação inicial de credenciais
-    if CLOCKIFY_API_KEY.startswith('sua_api_key'):
-        print("❌ Configure sua CLOCKIFY_API_KEY!")
+    # Verificação de credenciais
+    if not CLOCKIFY_API_KEY:
+        print("❌ Configure sua CLOCKIFY_API_KEY no arquivo .env!")
         return
     
-    # Obter informações do usuário Clockify
+    # Obter usuário Clockify
     try:
         usuario = requests.get(
             'https://api.clockify.me/api/v1/user',
@@ -168,14 +161,14 @@ def main():
         print("❌ Falha na autenticação do Clockify")
         return
     
-    # Configurar parâmetros iniciais
+    # Configurações iniciais
     workspace_id = usuario['activeWorkspace']
     user_id = usuario['id']
     ultimo_processamento = ler_ultimo_processamento()
 
-    print(workspace_id, user_id)
-    
-    print(f"\n🕒 Último processamento válido: {ultimo_processamento.isoformat()}")
+    print(f"\n🕒 Último processamento: {ultimo_processamento.isoformat()}")
+    print(f"🔑 Acessando Jira como: {JIRA_USER_EMAIL}")
+    print(f"👤 Registrando worklogs como: {JIRA_REAL_USER}")
     
     # Obter entradas do Clockify
     entradas = obter_entradas_clockify(workspace_id, user_id, ultimo_processamento)
@@ -187,14 +180,12 @@ def main():
     for entrada in entradas:
         print(f"\n🔨 Processando entrada: {entrada.get('id', 'sem-ID')}")
         
-        # Verificar se a entrada está completa
         intervalo = entrada.get('timeInterval', {})
         if not intervalo.get('end'):
             print("⏳ Entrada ainda em andamento. Pulando...")
             continue
             
         try:
-            # Converter datas para UTC
             inicio = datetime.datetime.fromisoformat(
                 intervalo['start'].replace('Z', '+00:00')
             ).astimezone(utc)
@@ -206,21 +197,17 @@ def main():
             print(f"⚠️ Erro ao converter datas: {str(e)}")
             continue
         
-        # Atualizar último processamento
         if fim > novo_ultimo_processamento:
             novo_ultimo_processamento = fim
         
-        # Extrair issue key
         issue_key = extrair_issue_key(entrada.get('description', ''))
         if not issue_key:
             print("📭 Nenhum issue key encontrado na descrição")
             continue
             
-        # Dividir em períodos diários
         segmentos = dividir_intervalo(inicio, fim)
         print(f"📆 Segmentos diários: {len(segmentos)}")
         
-        # Criar worklogs para cada segmento
         for seg_inicio, seg_fim in segmentos:
             duracao = (seg_fim - seg_inicio).total_seconds()
             
@@ -237,7 +224,7 @@ def main():
             )
             
             if sucesso:
-                print(f"✔️ Worklog registrado com sucesso")
+                print("✔️ Worklog registrado com sucesso")
     
     # Atualizar último processamento
     salvar_ultimo_processamento(novo_ultimo_processamento)
