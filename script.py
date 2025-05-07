@@ -96,19 +96,19 @@ def criar_worklog_jira(issue_key: str, inicio: datetime.datetime, duracao_segund
     logger.info(f"Issue extraída: {issue_key}")
     
     payload = {
-    "comment": {
-        "type": "doc",
-        "version": 1,
-        "content": [
-            {
-                "type": "paragraph",
-                "content": [{"text": descricao, "type": "text"}]
-            }
-        ]
-    },
-    "started": inicio.strftime("%Y-%m-%dT%H:%M:%S.000+0000"),
-    "timeSpentSeconds": int(duracao_segundos)
-}
+        "comment": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"text": descricao, "type": "text"}]
+                }
+            ]
+        },
+        "started": inicio.strftime("%Y-%m-%dT%H:%M:%S.000+0000"),
+        "timeSpentSeconds": int(duracao_segundos)
+    }
     
     try:
         response = requests.post(
@@ -178,7 +178,7 @@ def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: st
     
     # Verificação de credenciais
     if not clockify_api_key:
-        logger.info(f"clockify_api_key do usuário {usuario} não cadastrada no arquivo excel!")
+        logger.error(f"clockify_api_key do usuário {usuario} não cadastrada no arquivo excel!")
         return
     
     # Obter usuário Clockify
@@ -269,7 +269,13 @@ def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: st
 
 def main():
 
-    df = pd.read_excel('tokens.xlsx')
+    logger.info('Iniciando programa')
+
+    try:
+        df = pd.read_excel('tokens.xlsx')
+    except Exception as e:
+        logger.critical(f"Erro ao ler excel dos tokens: {repr(e)}\n{traceback.format_exc()}")
+        return
 
     for i in df.index:
 
