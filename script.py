@@ -63,7 +63,7 @@ def obter_entradas_clockify(workspace_id: str, user_id: str, clockify_api_key: s
         'end': end
     }
     
-    logger.info(f"Buscando entradas no Clockify de {params['start']} até {params['end']}")
+    logger.debug(f"Buscando entradas no Clockify de {params['start']} até {params['end']}")
     
     try:
         response = requests.get(
@@ -93,7 +93,7 @@ def criar_worklog_jira(issue_key: str, inicio: datetime.datetime, duracao_segund
     """Cria worklog no Jira atribuído ao usuário real (Matheus)"""
 
     url = f"https://{JIRA_DOMAIN}/rest/api/3/issue/{issue_key}/worklog"
-    logger.info(f"Issue extraída: {issue_key}")
+    logger.debug(f"Issue extraída: {issue_key}")
     
     payload = {
         "comment": {
@@ -166,7 +166,7 @@ def worklog_lancado(entrada: str, issue_key: str, email: str, jira_api_key: str)
     for worklog in response_data["worklogs"]:
         data_horario_worklog = datetime.datetime.strptime(worklog["started"], "%Y-%m-%dT%H:%M:%S.%f%z")
         if data_horario_clockify == data_horario_worklog:
-            logger.info(f"Worklog já lançado")
+            logger.debug(f"Worklog já lançado")
             return True
         
     return False
@@ -174,7 +174,7 @@ def worklog_lancado(entrada: str, issue_key: str, email: str, jira_api_key: str)
 
 def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: str, email: str):
 
-    logger.info(f"Iniciando integração Clockify -> Jira do usuário {usuario}")
+    logger.debug(f"Iniciando integração Clockify -> Jira do usuário {usuario}")
     
     # Verificação de credenciais
     if not clockify_api_key:
@@ -204,16 +204,16 @@ def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: st
     workspace_id = usuario_json['activeWorkspace']
     user_id = usuario_json['id']
 
-    logger.info(f"Acessando Jira como: {email}")
+    logger.debug(f"Acessando Jira como: {email}")
     logger.info(f"Registrando worklogs como: {usuario}")
     
     # Obter entradas do Clockify
     entradas = obter_entradas_clockify(workspace_id, user_id, clockify_api_key)
-    logger.info(f"Entradas encontradas: {len(entradas)}")
+    logger.debug(f"Entradas encontradas: {len(entradas)}")
     
     # Processar cada entrada
     for entrada in entradas:
-        logger.info(f"Processando entrada: {entrada.get('id', 'sem-ID')}")
+        logger.debug(f"Processando entrada: {entrada.get('id', 'sem-ID')}")
 
         intervalo = entrada.get('timeInterval', {})
         if not intervalo.get('end'):
@@ -234,23 +234,23 @@ def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: st
         
         issue_key = extrair_issue_key(entrada.get('description', ''))
         if not issue_key:
-            logger.info("Nenhum issue key encontrado na descrição")
+            logger.debug("Nenhum issue key encontrado na descrição")
             continue
 
         if worklog_lancado(entrada, issue_key, email, jira_api_key):
             continue
             
         segmentos = dividir_intervalo(inicio, fim)
-        logger.info(f"Segmentos diários: {len(segmentos)}")
+        logger.debug(f"Segmentos diários: {len(segmentos)}")
         
         for seg_inicio, seg_fim in segmentos:
             duracao = (seg_fim - seg_inicio).total_seconds()
 
             if duracao < 60:
-                logger.info(f"Duração muito curta ({duracao}s). Pulando...")
+                logger.debug(f"Duração muito curta ({duracao}s). Pulando...")
                 continue
 
-            logger.info(f"Processando: {seg_inicio.time()} → {seg_fim.time()} ({duracao}s)")
+            logger.debug(f"Processando: {seg_inicio.time()} → {seg_fim.time()} ({duracao}s)")
             sucesso = criar_worklog_jira(
                 issue_key=issue_key,
                 inicio=seg_inicio,
@@ -264,7 +264,7 @@ def integrar_clockify_jira(usuario: str, clockify_api_key: str, jira_api_key: st
             if sucesso:
                 logger.info("Worklog registrado com sucesso")
     
-    logger.info(f"Processamento concluído!")
+    logger.info(f"Processamento concluído para o usuário {usuario}!")
 
 
 def main():
